@@ -1,15 +1,42 @@
 # -*- coding: utf-8 -*-
 from __future__ import unicode_literals
 
-from django.test import TestCase, Client
-from django.contrib.auth.models import User
+from django.test import TestCase
+from django.test import Client as HttpClient
+from django.contrib.auth.models import User, Permission
 from django.core.management import call_command
 from django.apps import apps
 
 from faker import Factory
 
+from conf.models import Site, SitePermission
+
 
 fake = Factory.create()
+
+
+def init_api_test_data():
+    """
+    Generates fake data, starts an HttpClient session, creates a fake user and
+    logs that user in.
+    """
+    call_command('migrate', verbosity=0)
+    call_command('fake', verbosity=0, iterations=1)
+
+    c = HttpClient()
+
+    fake_user = fake.simple_profile()
+    fake_password = fake.password()
+    user = User.objects.create_user(fake_user['username'], fake_user['mail'],
+                                    fake_password)
+    site_permission = SitePermission.objects.create(user=user)
+    site_permission.sites.set(Site.objects.filter(id=1))
+    site_permission.save()
+
+    user = User.objects.get(username=fake_user['username'])
+    c.login(username=fake_user['username'], password=fake_password)
+
+    return [c, user]
 
 
 class AppTestCase(TestCase):
@@ -20,62 +47,154 @@ class AppTestCase(TestCase):
         self.assertEqual(apps.get_app_config('api').name, 'api')
 
 
-class BrowseableApiTestCase(TestCase):
+class ClientBrowseableApiTestCase(TestCase):
     def setUp(self):
-        call_command('fake', verbosity=0, iterations=1)
+        self.c, self.user = init_api_test_data()
 
-        self.c = Client()
+    def test_clients_get(self):
+        page = self.c.get('/api/clients/')
+        self.assertEqual(page.status_code, 403)
 
-        fake_user = fake.simple_profile()
-        fake_password = fake.password()
-        User.objects.create_user(fake_user['username'], fake_user['mail'],
-                                 fake_password)
+        self.user.user_permissions.add(
+            Permission.objects.get(codename='view_client'))
 
-        self.c.login(username=fake_user['username'], password=fake_password)
-
-    def test_users_get(self):
-        page = self.c.get('/api/users/')
+        page = self.c.get('/api/clients/')
         self.assertEqual(page.status_code, 200)
 
-    def test_timesheets_get(self):
-        page = self.c.get('/api/timesheets/')
-        self.assertEqual(page.status_code, 200)
+    def test_clients_post(self):
+        page = self.c.post('/api/clients/', {
+            'name': fake.company()
+        })
+        self.assertEqual(page.status_code, 403)
 
-    def test_tasks_get(self):
-        page = self.c.get('/api/tasks/')
-        self.assertEqual(page.status_code, 200)
+        self.user.user_permissions.add(
+            Permission.objects.get(codename='add_client'))
 
-    def test_entries_get(self):
-        page = self.c.get('/api/entries/')
-        self.assertEqual(page.status_code, 200)
-
-    def test_timesheets_post(self):
-        page = self.c.post('/api/timesheets/', {
+        page = self.c.post('/api/clients/', {
             'name': fake.company()
         })
         self.assertEqual(page.status_code, 201)
 
-    def test_tasks_post(self):
-        timesheets_page = self.c.get('/api/timesheets/')
-        timesheets = timesheets_page.json()
+    def test_clients_post_unicode(self):
+        self.user.user_permissions.add(
+            Permission.objects.get(codename='add_client'))
 
-        page = self.c.post('/api/timesheets/', {
-            'timesheet': timesheets['results'][0]['url'],
+        page = self.c.post('/api/clients/', {
+            'name': 'Юникод'
+        })
+        self.assertEqual(page.status_code, 201)
+
+
+class ProjectBrowseableApiTestCase(TestCase):
+    def setUp(self):
+        self.c, self.user = init_api_test_data()
+
+    def test_projects_get(self):
+        page = self.c.get('/api/projects/')
+        self.assertEqual(page.status_code, 403)
+
+        self.user.user_permissions.add(
+            Permission.objects.get(codename='view_project'))
+
+        page = self.c.get('/api/projects/')
+        self.assertEqual(page.status_code, 200)
+
+    def test_projects_post(self):
+        self.user.user_permissions.add(
+            Permission.objects.get(codename='view_client'))
+
+        clients_page = self.c.get('/api/clients/')
+        clients = clients_page.json()
+
+        page = self.c.post('/api/projects/', {
+            'client': clients[0]['url'],
+            'name': fake.job()
+        })
+
+        self.assertEqual(page.status_code, 403)
+
+        self.user.user_permissions.add(
+            Permission.objects.get(codename='add_project'))
+
+        page = self.c.post('/api/projects/', {
+            'client': clients[0]['url'],
             'name': fake.job()
         })
 
         self.assertEqual(page.status_code, 201)
 
+    def test_projects_post_unicode(self):
+        self.user.user_permissions.add(
+            Permission.objects.get(codename='add_project'),
+            Permission.objects.get(codename='view_client'))
+
+        clients_page = self.c.get('/api/clients/')
+        clients = clients_page.json()
+
+        page = self.c.post('/api/projects/', {
+            'client': clients[0]['url'],
+            'name': 'Юникод'
+        })
+
+        self.assertEqual(page.status_code, 201)
+
+
+class EntryBrowseableApiTestCase(TestCase):
+    def setUp(self):
+        self.c, self.user = init_api_test_data()
+
+    def test_entries_get(self):
+        page = self.c.get('/api/entries/')
+        self.assertEqual(page.status_code, 403)
+
+        self.user.user_permissions.add(
+            Permission.objects.get(codename='view_entry'))
+
+        page = self.c.get('/api/entries/')
+        self.assertEqual(page.status_code, 200)
+
     def test_entries_post(self):
-        tasks_page = self.c.get('/api/tasks/')
-        tasks = tasks_page.json()
+        self.user.user_permissions.add(
+            Permission.objects.get(codename='view_project'))
+
+        projects_page = self.c.get('/api/projects/')
+        projects = projects_page.json()
         users_page = self.c.get('/api/users/')
         users = users_page.json()
 
         page = self.c.post('/api/entries/', {
-            'task': tasks['results'][0]['url'],
-            'user': users['results'][0]['url'],
+            'project': projects[0]['url'],
+            'user': users[0]['url'],
+            'duration': '1:30:00'
+        })
+
+        self.assertEqual(page.status_code, 403)
+
+        self.user.user_permissions.add(
+            Permission.objects.get(codename='add_entry'))
+
+        page = self.c.post('/api/entries/', {
+            'project': projects[0]['url'],
+            'user': users[0]['url'],
             'duration': '1:30:00'
         })
 
         self.assertEqual(page.status_code, 201)
+
+
+class UserBrowseableApiTestCase(TestCase):
+    def setUp(self):
+        self.c, self.user = init_api_test_data()
+
+    def test_permission_get(self):
+        page = self.c.get('/api/permissions/')
+        self.assertEqual(page.status_code, 200)
+
+
+class PermissionBrowseableApiTestCase(TestCase):
+    def setUp(self):
+        self.c, self.user = init_api_test_data()
+
+    def test_users_get(self):
+        page = self.c.get('/api/users/')
+        self.assertEqual(page.status_code, 200)

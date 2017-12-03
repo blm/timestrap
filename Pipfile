@@ -1,0 +1,28 @@
+[[source]]
+url = "https://pypi.python.org/simple"
+verify_ssl = true
+
+
+[dev-packages]
+
+"flake8" = "*"
+coveralls = "*"
+selenium = "*"
+sphinx = "*"
+recommonmark = "*"
+"sphinx-rtd-theme" = "*"
+
+
+[packages]
+
+django = "*"
+"django-widget-tweaks" = "*"
+whitenoise = "*"
+djangorestframework = "*"
+"django-filter" = "*"
+"django-import-export" = "*"
+faker = "*"
+"dj-database-url" = "*"
+"psycopg2" = "*"
+gunicorn = "*"
+ipaddress = "*"

@@ -1,16 +1,18 @@
+# -*- coding: utf-8 -*-
 from random import randint, choice
 from datetime import timedelta
+from decimal import Decimal
 
 from django.core.management.base import BaseCommand
 from django.contrib.auth.models import User
 
 from faker import Factory
 
-from core.models import Timesheet, Task, Entry
+from core.models import Client, Entry, Project, Task
 
 
 class Command(BaseCommand):
-    help = 'Generates a bunch of fake timesheets, tasks, and entries'
+    help = 'Generates a bunch of fake clients, projects, and entries'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -27,13 +29,36 @@ class Command(BaseCommand):
         if not iterations:
             iterations = 5
 
-        for i in range(iterations):
-            Timesheet.objects.create(name=fake.company())
+        for i in range(randint(iterations, iterations*2)):
+            task_name = (fake
+                         .sentence(nb_words=3, variable_nb_words=True)
+                         .replace('.', '')
+                         .capitalize())
+            Task.objects.create(
+                name=task_name,
+                hourly_rate=Decimal(
+                    '%d.%d' % (randint(0, 200), randint(0, 99)))
+            )
 
-        for timesheet in Timesheet.objects.iterator():
-            task_iterations = randint(iterations, iterations*2)
-            for i in range(task_iterations):
-                Task.objects.create(timesheet=timesheet, name=fake.job())
+        for i in range(iterations):
+            Client.objects.create(name=fake.company())
+
+        for client in Client.objects.iterator():
+            project_iterations = randint(iterations, iterations*2)
+            for i in range(project_iterations):
+                estimated = choice([True, False])
+                estimate = None
+                if estimated:
+                    estimate = randint(1000, 20000)
+                project_name = (fake
+                                .sentence(nb_words=3, variable_nb_words=True)
+                                .replace('.', '')
+                                .capitalize())
+                Project.objects.create(
+                    client=client,
+                    estimate=estimate,
+                    name=project_name
+                )
 
         for i in range(iterations):
             fake_user = fake.simple_profile(sex=None)
@@ -49,9 +74,10 @@ class Command(BaseCommand):
             User.objects.create_user(username, email, password)
 
         users = User.objects.all()
+        projects = Project.objects.all()
         tasks = Task.objects.all()
 
-        for task in tasks:
+        for project in projects:
             entry_iterations = randint(iterations*2, iterations*4)
             for i in range(entry_iterations):
                 date = fake.date_time_between(
@@ -64,8 +90,9 @@ class Command(BaseCommand):
                     minutes=randint(1, 60)
                 )
                 Entry.objects.create(
-                    task=task,
+                    project=project,
                     user=choice(users),
+                    task=choice(tasks),
                     date=date,
                     duration=duration,
                     note=fake.sentence(nb_words=6, variable_nb_words=True)
